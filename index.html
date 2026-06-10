@@ -50,7 +50,7 @@
         <h1 class="text-lg font-bold tracking-tight">실시간 포인트 순위</h1>
       </div>
       <!-- 관리 페이지로 바로가는 작은 아이콘 (더블클릭 시 이동) -->
-      <a href="admin.html" target="_blank" class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition" title="관리 페이지 열기 (더블클릭)">
+      <a href="admin.html" target="_blank" class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition" title="관리 페이지 열기">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
         </svg>
@@ -60,64 +60,105 @@
     <!-- 순위 리스트 컨테이너 (JS 동적 생성) -->
     <div id="rankingList" class="space-y-2.5">
       <!-- Loading state -->
-      <div class="ranking-card flex items-center p-4 gap-3 text-sm text-gray-400">
-        데이터를 불러오는 중... (관리 페이지를 먼저 열어주세요)
+      <div class="ranking-card flex items-center p-4 gap-3 text-sm text-gray-400 justify-center">
+        <svg class="animate-spin h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span>실시간 데이터 연결 중...</span>
       </div>
     </div>
 
   </div>
 
-  <script>
-    const STORAGE_KEY = 'notion_student_points_v2';
+  <!-- Firebase 모듈을 이용한 실시간 클라우드 연동 -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // 글로벌 연동 환경 변수
+    const firebaseConfig = JSON.parse(__firebase_config);
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
     const listContainer = document.getElementById('rankingList');
+    let students = [];
 
-    // 데이터를 불러오고 순위를 계산하여 화면에 표시하는 함수
-    function updateRankingView() {
-      // 1. LocalStorage에서 데이터 로드
-      const savedData = localStorage.getItem(STORAGE_KEY);
-      if (!savedData) {
-        listContainer.innerHTML = `
-          <div class="ranking-card flex items-center p-4 gap-3 text-sm text-gray-400 border-yellow-200 bg-yellow-50">
-            등록된 데이터가 없습니다. <a href="admin.html" target="_blank" class="text-blue-600 font-medium underline ml-1">관리 페이지</a>에서 학생을 등록해주세요.
-          </div>`;
-        return;
+    // 인증 절차 실행 (규칙 3 준수)
+    async function startAuth() {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        await signInAnonymously(auth);
       }
-      
-      let students = [];
-      try { students = JSON.parse(savedData); } catch (e) { students = []; }
+    }
 
-      // 2. 점수 기준 내림차순 정렬 (동점시 이름순)
+    // 초기화 및 실시간 감시 시작
+    async function init() {
+      await startAuth();
+
+      onAuthStateChanged(auth, (user) => {
+        if (!user) return;
+
+        // 클라우드 특정 문서 참조 (규칙 1 준수)
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', 'students_doc');
+
+        // 실시간 변경 감시 (onSnapshot)
+        onSnapshot(docRef, (docSnap) => {
+          if (docSnap.exists()) {
+            students = docSnap.data().students || [];
+            updateRankingView();
+          } else {
+            listContainer.innerHTML = `
+              <div class="ranking-card flex flex-col items-center p-5 text-sm text-gray-500 border-yellow-200 bg-yellow-50 text-center">
+                <span class="text-lg">📢</span>
+                <span class="font-semibold mt-1">아직 등록된 점수가 없습니다.</span>
+                <span class="text-xs text-gray-400 mt-1">관리자 페이지(admin.html)에서 점수를 먼저 등록하고 [전체 저장]을 눌러주세요.</span>
+              </div>`;
+          }
+        }, (error) => {
+          console.error("데이터 수신 오류:", error);
+          listContainer.innerHTML = `<div class="p-4 text-xs text-red-500 text-center">실시간 연결 중 에러가 발생했습니다.</div>`;
+        });
+      });
+    }
+
+    // 데이터를 받아서 순위 화면을 그리는 함수
+    function updateRankingView() {
+      // 점수 기준 내림차순 정렬 (동점시 이름 가나다순)
       const sortedStudents = [...students].sort((a, b) => {
         if (b.points !== a.points) { return b.points - a.points; }
         return a.name.localeCompare(b.name, 'ko');
       });
 
-      // 3. HTML 생성
       listContainer.innerHTML = '';
       
       sortedStudents.forEach((student, index) => {
         const rank = index + 1;
         const isTop = rank === 1;
         
-        // 1등 앞에는 왕관 이모지 추가
+        // 1등 학생 앞에는 왕관 추가
         const displayName = isTop ? `👑 ${escapeHtml(student.name)}` : escapeHtml(student.name);
 
         const card = document.createElement('div');
-        // 제공 이미지 테두리 스타일 적용 + 1등 강조
         card.className = `ranking-card flex items-center justify-between p-3.5 gap-3 transition-colors ${isTop ? 'top-rank-1' : ''}`;
 
         card.innerHTML = `
           <div class="flex items-center gap-3">
-            <!-- 등수/왕관 -->
+            <!-- 등수 -->
             <div class="w-7 text-center font-extrabold ${isTop ? 'text-lg text-yellow-600' : 'text-sm text-gray-400'}">
               ${rank}
             </div>
-            <!-- 학생 이름 -->
+            <!-- 이름 -->
             <span class="font-semibold text-sm ${isTop ? 'text-blue-900' : 'text-gray-800'}">
               ${displayName}
             </span>
           </div>
-          <!-- 포인트 수치 -->
+          <!-- 포인트 -->
           <div class="text-right">
             <span class="font-black text-base ${isTop ? 'text-blue-700' : 'text-gray-950'}">
               ${student.points}
@@ -129,21 +170,14 @@
       });
     }
 
-    // 초기 실행
-    window.onload = updateRankingView;
-
-    // 핵심: 다른 창(관리 페이지)에서 LocalStorage가 변경되면 자동으로 뷰 업데이트
-    window.addEventListener('storage', (event) => {
-      if (event.key === STORAGE_KEY) {
-        updateRankingView();
-      }
-    });
-
-    // 단순 문자 탈출 처리 (XSS 방지)
+    // 특수문자 치환 (XSS 방지)
     function escapeHtml(text) {
       if (!text) return '';
       return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
     }
+
+    // 실행 시작
+    window.onload = init;
   </script>
 </body>
 </html>
