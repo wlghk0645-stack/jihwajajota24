@@ -39,6 +39,26 @@
       </div>
     </div>
 
+    <!-- 깃허브 배포 가이드라인 알림창 (설정이 비어있을 때만 표시) -->
+    <div id="setupGuide" class="hidden bg-amber-50 border border-amber-200 rounded-2xl p-6 text-gray-800 space-y-4">
+      <div class="flex items-start gap-3">
+        <span class="text-2xl mt-0.5">⚠️</span>
+        <div>
+          <h3 class="text-base font-bold text-amber-900">클라우드 데이터베이스(Firebase) 연결 설정 필요</h3>
+          <p class="text-sm text-amber-800 mt-1">
+            이 위젯을 깃허브 페이지 등 외부 환경에 배포하여 스마트폰과 실시간 연동하려면, 본인의 Firebase 설정값을 입력해주셔야 합니다. 아래 절차를 완료하시면 즉시 전 기기 연동이 활성화됩니다.
+          </p>
+        </div>
+      </div>
+      <div class="text-xs bg-white/70 p-4 rounded-xl space-y-2 border border-amber-100 font-mono text-gray-700 leading-relaxed">
+        <p class="font-bold text-amber-950 text-sm">🛠️ 실시간 동기화 활성화 방법:</p>
+        <p>1. <a href="https://console.firebase.google.com/" target="_blank" class="text-blue-600 underline font-bold">Firebase 콘솔</a>에 접속하여 새 프로젝트를 생성합니다.</p>
+        <p>2. 빌드 메뉴에서 <strong>Firestore Database</strong>를 생성합니다. (보안 규칙은 테스트 모드로 시작 또는 읽기/쓰기 허용 설정)</p>
+        <p>3. 프로젝트 설정에서 <strong>웹 앱(</>)</strong>을 추가한 후 발급받는 설정 객체(firebaseConfig)를 복사합니다.</p>
+        <p>4. <code class="bg-gray-100 px-1 rounded text-red-500 font-bold">admin.html</code> 및 <code class="bg-gray-100 px-1 rounded text-red-500 font-bold">index.html</code> 하단 스크립트 영역의 <code class="text-blue-600">firebaseConfig</code> 안에 해당 값들을 붙여넣고 깃허브에 다시 커밋하세요.</p>
+      </div>
+    </div>
+
     <!-- 전체 정보 일괄 수정 (Form) -->
     <div class="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
       <div class="flex justify-between items-center mb-4">
@@ -70,14 +90,54 @@
     import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
     import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    const firebaseConfig = JSON.parse(__firebase_config);
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    // 1. 외부 호스팅 배포 환경을 위한 안전한 환경 변수 파싱 처리
+    let firebaseConfig = {};
+    let appId = 'my-notion-widget';
 
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
+    // 깃허브 등 외부 호스트 사용 시 이 값을 자신의 Firebase 프로젝트 키로 채워 넣으면 작동합니다!
+    const MY_PRIVATE_FIREBASE_CONFIG = {
+      apiKey: "AIzaSyDsjN0ERiMC3BAqEy7tkkMNZisONmKAKbE",
+      authDomain: "notion-ranking.firebaseapp.com",
+      projectId: "notion-ranking",
+      storageBucket: "notion-ranking.firebasestorage.app",
+      messagingSenderId: "85799241871",
+      appId: "1:85799241871:web:e935d33f834bfc4d0308fa"
+    };
 
-    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', 'students_doc');
+    try {
+      if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+        firebaseConfig = JSON.parse(__firebase_config);
+      } else {
+        firebaseConfig = MY_PRIVATE_FIREBASE_CONFIG;
+      }
+    } catch (e) {
+      firebaseConfig = MY_PRIVATE_FIREBASE_CONFIG;
+    }
+
+    try {
+      if (typeof __app_id !== 'undefined' && __app_id) {
+        appId = __app_id;
+      }
+    } catch (e) {
+      appId = 'my-notion-widget';
+    }
+
+    // 2. 만약 Firebase 정보가 채워지지 않은 디폴트 플레이스홀더인 경우 화면 가이드 노출
+    if (!firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith("YOUR_")) {
+      document.getElementById('setupGuide').classList.remove('hidden');
+      document.getElementById('modalInputContainer').innerHTML = `
+        <div class="col-span-2 text-center py-6 text-amber-600 font-medium bg-amber-50 rounded-xl">
+          ⚠️ 클라우드 데이터베이스 설정 정보가 필요합니다. 상단 안내를 확인하세요.
+        </div>`;
+      document.getElementById('liveAdjustmentList').innerHTML = `
+        <div class="text-center py-6 text-amber-600 font-medium bg-amber-50 rounded-xl">
+          ⚠️ 설정을 완료한 후 데이터 저장소를 연결하면 실시간 조절 창이 활성화됩니다.
+        </div>`;
+    } else {
+      // 정상 연결 상태인 경우 Firebase 이니셜라이즈 시작
+      startFirebaseApp();
+    }
+
     let students = [];
 
     // 초기 샘플 데이터 (8명)
@@ -87,16 +147,16 @@
       { id: 7, name: '윤지민', points: 50 }, { id: 8, name: '강하준', points: 30 }
     ];
 
-    // 인증 실행
-    async function startAuth() {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
-      }
-    }
+    let db;
+    let auth;
+    let docRef;
 
-    async function init() {
+    async function startFirebaseApp() {
+      const app = initializeApp(firebaseConfig);
+      auth = getAuth(app);
+      db = getFirestore(app);
+      docRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', 'students_doc');
+
       await startAuth();
 
       onAuthStateChanged(auth, (user) => {
@@ -114,8 +174,30 @@
           renderAdminView();
         }, (error) => {
           console.error("실시간 데이터 읽기 실패:", error);
+          document.getElementById('modalInputContainer').innerHTML = `
+            <div class="col-span-2 text-center py-4 text-xs text-red-500">
+              데이터베이스 규칙 설정 오류 또는 연동 실패. (보안규칙에서 읽기/쓰기가 허용되었는지 확인하세요)
+            </div>`;
         });
       });
+    }
+
+    // 인증 실행
+    async function startAuth() {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (e) {
+        // 커스텀 토큰 실패 시 익명 로그인으로 안전한 전환 유도
+        try {
+          await signInAnonymously(auth);
+        } catch (err) {
+          console.error("인증 처리 중 실패:", err);
+        }
+      }
     }
 
     // 관리자 UI 갱신 함수
@@ -210,11 +292,15 @@
       const index = students.findIndex(s => s.id === id);
       if (index !== -1) {
         students[index].points = Math.max(0, students[index].points + amount);
-        await setDoc(docRef, { students });
+        try {
+          await setDoc(docRef, { students });
+        } catch (e) {
+          console.error("데이터 변경 적용 실패:", e);
+        }
       }
     }
 
-    // 일괄 폼 정보 저장
+    // 폼 일괄 정보 저장
     async function saveAllEdits() {
       const newStudents = [];
       for (let i = 1; i <= 8; i++) {
@@ -231,15 +317,23 @@
       }
 
       students = newStudents;
-      await setDoc(docRef, { students });
-      alert('모든 정보가 클라우드에 성공적으로 저장되었으며, 노션 위젯에 실시간 동기화되었습니다!');
+      try {
+        await setDoc(docRef, { students });
+        alert('모든 정보가 클라우드에 성공적으로 저장되었으며, 노션 위젯에 실시간 동기화되었습니다!');
+      } catch (e) {
+        alert('저장에 실패하였습니다. Firebase Database 연결 또는 접근 권한 설정을 다시 한번 점검해 주세요.');
+      }
     }
 
     // 샘플 복구 기능
     async function resetData() {
       if(!confirm('모든 학생 정보를 샘플용 기본값으로 초기화하시겠습니까?')) return;
       students = JSON.parse(JSON.stringify(DEFAULT_STUDENTS));
-      await setDoc(docRef, { students });
+      try {
+        await setDoc(docRef, { students });
+      } catch (e) {
+        alert('초기화에 실패했습니다.');
+      }
     }
 
     // 특수문자 안전 처리
@@ -251,7 +345,6 @@
     // 이벤트 리스너 바인딩 및 시작
     document.getElementById('saveBtn').addEventListener('click', saveAllEdits);
     document.getElementById('resetBtn').addEventListener('click', resetData);
-    window.onload = init;
   </script>
 </body>
 </html>
