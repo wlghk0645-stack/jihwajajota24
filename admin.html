@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>점수 관리 패널 [Notion Widget Admin]</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: { fontFamily: { sans: ['Pretendard', 'sans-serif'] } },
+      },
+    }
+  </script>
+  <style>
+    body { background-color: #f7f9fc; color: #191919; -webkit-font-smoothing: antialiased; }
+    input[type=number]::-webkit-inner-spin-button, 
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  </style>
+</head>
+<body class="p-4 md:p-6 lg:p-8">
+
+  <div class="max-w-4xl mx-auto space-y-6">
+    
+    <!-- 헤더 -->
+    <div class="flex items-center justify-between pb-4 border-b border-gray-200">
+      <div class="flex items-center gap-2.5">
+        <span class="text-2xl">⚙️</span>
+        <h1 class="text-xl md:text-2xl font-bold">학생 포인트 관리 패널</h1>
+      </div>
+      <div class="flex items-center gap-2">
+        <!-- 위젯 열기 버튼 (연동 확인용) -->
+        <a href="index.html" target="_blank" class="px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 hover:bg-gray-200 transition">
+          순위 위젯 열기
+        </a>
+        <button onclick="saveAllEdits()" class="px-5 py-2 text-sm font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow transition">
+          전체 저장
+        </button>
+      </div>
+    </div>
+
+    <!-- 전체 정보 일괄 수정 (Form) -->
+    <div class="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-sm font-bold text-gray-500 uppercase tracking-wider">👥 학생 명단 & 기본 점수 (8명)</h2>
+        <button onclick="resetData()" class="text-xs text-red-500 hover:text-red-700 underline font-medium">샘플 데이터로 리셋</button>
+      </div>
+      
+      <!-- 입력 폼 컨테이너 (JS 생성) -->
+      <div id="modalInputContainer" class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 mb-5 max-h-[300px] overflow-y-auto pr-1">
+        <!-- JS로 8개 입력필드 생성 -->
+      </div>
+    </div>
+
+    <!-- 실시간 조정 패널 -->
+    <div class="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+      <h2 class="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">⚡ 실시간 점수 조정 (+/-10p)</h2>
+      
+      <!-- 실시간 리스트 컨테이너 (JS 생성) -->
+      <div id="liveAdjustmentList" class="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+        <!-- JS 동적 생성 -->
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'notion_student_points_v2';
+    
+    // 초기 샘플 데이터 (8명)
+    const DEFAULT_STUDENTS = [
+      { id: 1, name: '김지훈', points: 150 }, { id: 2, name: '이서윤', points: 120 }, { id: 3, name: '박민재', points: 110 },
+      { id: 4, name: '최예은', points: 90 }, { id: 5, name: '정준우', points: 80 }, { id: 6, name: '한서현', points: 70 },
+      { id: 7, name: '윤지민', points: 50 }, { id: 8, name: '강하준', points: 30 }
+    ];
+
+    let students = [];
+
+    // 초기 로드
+    window.onload = function() {
+      const savedData = localStorage.getItem(STORAGE_KEY);
+      if (savedData) {
+        try { students = JSON.parse(savedData); } catch (e) { students = [...DEFAULT_STUDENTS]; }
+      } else {
+        students = [...DEFAULT_STUDENTS];
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
+      }
+      renderAdminView();
+    };
+
+    // 관리자 페이지 전체 화면 갱신
+    function renderAdminView() {
+      renderFormInputs();
+      renderLiveList();
+    }
+
+    // 1. 일괄 수정 폼 생성
+    function renderFormInputs() {
+      const container = document.getElementById('modalInputContainer');
+      container.innerHTML = '';
+      
+      // ID 순서대로 정렬하여 출력
+      const currentStudents = [...students].sort((a, b) => a.id - b.id);
+
+      currentStudents.forEach((student) => {
+        const item = document.createElement('div');
+        item.className = 'flex grid grid-cols-10 gap-2 items-center bg-gray-50 p-2.5 rounded-lg border border-gray-100';
+        item.innerHTML = `
+          <div class="col-span-1 text-center font-bold text-xs text-gray-400">${student.id}</div>
+          <div class="col-span-5">
+            <input type="text" id="edit-name-${student.id}" value="${escapeHtml(student.name)}" class="w-full px-3 py-1.5 text-sm font-semibold rounded-lg border border-gray-200 focus:ring-2 focus:ring-blue-300 focus:outline-none transition-all" placeholder="학생 이름">
+          </div>
+          <div class="col-span-4 relative flex items-center">
+            <input type="number" id="edit-points-${student.id}" value="${student.points}" min="0" class="w-full pl-3 pr-7 py-1.5 text-sm text-right font-bold rounded-lg border border-gray-200 focus:ring-2 focus:ring-blue-300 focus:outline-none transition-all" placeholder="점수">
+            <span class="absolute right-2.5 text-xs text-gray-400 font-bold pointer-events-none">p</span>
+          </div>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    // 2. 실시간 조정 리스트 생성
+    function renderLiveList() {
+      const listContainer = document.getElementById('liveAdjustmentList');
+      listContainer.innerHTML = '';
+
+      // ID 순서대로 정렬하여 출력
+      const currentStudents = [...students].sort((a, b) => a.id - b.id);
+
+      currentStudents.forEach((student) => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between p-3 rounded-lg border border-gray-100 bg-white hover:bg-gray-50';
+
+        row.innerHTML = `
+          <div class="flex items-center gap-3">
+            <span class="font-bold text-xs text-gray-400">${student.id}</span>
+            <span class="font-bold text-sm text-gray-700">${escapeHtml(student.name)}</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <div class="text-right">
+              <span class="text-base font-extrabold text-gray-900">${student.points}</span>
+              <span class="text-[10px] text-gray-400 font-medium ml-0.5">p</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <button onclick="changePoints(${student.id}, -10)" class="px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600 font-bold text-xs hover:bg-red-100 active:scale-95 transition-all" title="10포인트 감소">
+                -10
+              </button>
+              <button onclick="changePoints(${student.id}, 10)" class="px-2.5 py-1.5 rounded-lg bg-green-50 text-green-600 font-bold text-xs hover:bg-green-100 active:scale-95 transition-all" title="10포인트 추가">
+                +10
+              </button>
+            </div>
+          </div>
+        `;
+        listContainer.appendChild(row);
+      });
+    }
+
+    // 포인트 실시간 조절 함수
+    function changePoints(id, amount) {
+      const index = students.findIndex(s => s.id === id);
+      if (index !== -1) {
+        // 포인트 음수 방지 (최소 0점)
+        students[index].points = Math.max(0, students[index].points + amount);
+        
+        // LocalStorage 저장 (위젯 실시간 반영 유도)
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
+        
+        // 현재 페이지의 관리화면 갱신 (폼 입력 필드 제외하고 실시간 리스트만)
+        renderLiveList();
+      }
+    }
+
+    // 폼 입력 데이터 일괄 저장 함수
+    function saveAllEdits() {
+      const newStudents = [];
+      for (let i = 1; i <= 8; i++) {
+        const nameInput = document.getElementById(`edit-name-${i}`);
+        const pointsInput = document.getElementById(`edit-points-${i}`);
+
+        if (nameInput && pointsInput) {
+          const name = nameInput.value.trim() || `학생 ${i}`;
+          let points = parseInt(pointsInput.value);
+          if (isNaN(points) || points < 0) points = 0;
+
+          newStudents.push({ id: i, name: name, points: points });
+        }
+      }
+
+      students = newStudents;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
+      
+      // 화면 전체 갱신 (실시간 조정 패널도 업데이트 됨)
+      renderAdminView();
+      alert('모든 정보가 정상적으로 저장되었으며 위젯에 반영되었습니다!');
+    }
+
+    // 샘플 데이터로 리셋
+    function resetData() {
+      if(!confirm('모든 학생 정보를 샘플 데이터로 초기화하시겠습니까?')) return;
+      students = [...DEFAULT_STUDENTS];
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
+      renderAdminView();
+    }
+
+    // 단순 문자 탈출 처리 (XSS 방지)
+    function escapeHtml(text) {
+      if (!text) return '';
+      return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+  </script>
+</body>
+</html>
