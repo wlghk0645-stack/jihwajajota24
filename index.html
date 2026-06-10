@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -77,11 +78,10 @@
     import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
     import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    // 1. 외부 호스팅 배포 환경을 위한 안전한 환경 변수 파싱 처리
     let firebaseConfig = {};
     let appId = 'my-notion-widget';
 
-    // 깃허브 등 외부 호스트 사용 시 이 값을 자신의 Firebase 프로젝트 키로 채워 넣으면 작동합니다! (admin.html과 같게 설정)
+    // 🔴 사용자님의 Firebase 실시간 인증 정보 탑재 완료
     const MY_PRIVATE_FIREBASE_CONFIG = {
       apiKey: "AIzaSyDsjN0ERiMC3BAqEy7tkkMNZisONmKAKbE",
       authDomain: "notion-ranking.firebaseapp.com",
@@ -112,17 +112,8 @@
     const listContainer = document.getElementById('rankingList');
     let students = [];
 
-    // Firebase 정보가 채워지지 않은 기본 템플릿일 경우 화면에 친절하게 안내
-    if (!firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith("YOUR_")) {
-      listContainer.innerHTML = `
-        <div class="ranking-card flex flex-col items-center p-5 text-sm text-amber-800 border-amber-200 bg-amber-50 text-center">
-          <span class="text-xl">📢</span>
-          <span class="font-bold mt-1.5">클라우드 설정이 감지되지 않았습니다.</span>
-          <span class="text-xs text-amber-700/80 mt-1">관리자 페이지(admin.html)의 셋업 가이드 지침을 참고하여 자신의 Firebase 프로젝트 정보를 코드 내에 적용해 주세요.</span>
-        </div>`;
-    } else {
-      init();
-    }
+    // Firebase 로드 시작
+    init();
 
     // 인증 절차 실행
     async function startAuth(auth) {
@@ -132,47 +123,65 @@
         } else {
           await signInAnonymously(auth);
         }
+        return true;
       } catch (e) {
         try {
           await signInAnonymously(auth);
+          return true;
         } catch (err) {
           console.error("인증 실패:", err);
+          return false;
         }
       }
     }
 
     // 초기화 및 실시간 감시 시작
     async function init() {
-      const app = initializeApp(firebaseConfig);
-      const auth = getAuth(app);
-      const db = getFirestore(app);
+      try {
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
 
-      await startAuth(auth);
+        const authenticated = await startAuth(auth);
+        
+        if (!authenticated) {
+          listContainer.innerHTML = `
+            <div class="p-4 text-xs text-rose-500 text-center bg-rose-50 border border-rose-100 rounded-xl">
+              🔑인증 실패: Firebase 콘솔의 Authentication 메뉴에서 [익명 로그인] 서비스를 활성화해야 합니다.
+            </div>`;
+          return;
+        }
 
-      onAuthStateChanged(auth, (user) => {
-        if (!user) return;
+        onAuthStateChanged(auth, (user) => {
+          if (!user) return;
 
-        // 클라우드 특정 문서 참조
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', 'students_doc');
+          // 클라우드 특정 문서 참조
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', 'students_doc');
 
-        // 실시간 변경 감시 (onSnapshot)
-        onSnapshot(docRef, (docSnap) => {
-          if (docSnap.exists()) {
-            students = docSnap.data().students || [];
-            updateRankingView();
-          } else {
+          // 실시간 변경 감시 (onSnapshot)
+          onSnapshot(docRef, (docSnap) => {
+            if (docSnap.exists()) {
+              students = docSnap.data().students || [];
+              updateRankingView();
+            } else {
+              listContainer.innerHTML = `
+                <div class="ranking-card flex flex-col items-center p-5 text-sm text-gray-500 border-yellow-200 bg-yellow-50 text-center">
+                  <span class="text-lg">📢</span>
+                  <span class="font-semibold mt-1">아직 등록된 점수가 없습니다.</span>
+                  <span class="text-xs text-gray-400 mt-1">관리자 페이지(admin.html)에서 [전체 저장]을 눌러 데이터를 먼저 생성해 주세요.</span>
+                </div>`;
+            }
+          }, (error) => {
+            console.error("데이터 수신 오류:", error);
             listContainer.innerHTML = `
-              <div class="ranking-card flex flex-col items-center p-5 text-sm text-gray-500 border-yellow-200 bg-yellow-50 text-center">
-                <span class="text-lg">📢</span>
-                <span class="font-semibold mt-1">아직 등록된 점수가 없습니다.</span>
-                <span class="text-xs text-gray-400 mt-1">관리자 페이지(admin.html)에서 [전체 저장]을 눌러 데이터를 먼저 생성해 주세요.</span>
+              <div class="p-4 text-xs text-rose-500 text-center bg-rose-50 border border-rose-100 rounded-xl">
+                🔒접근 권한 거부됨. Firestore Database [규칙] 탭에서 읽기/쓰기가 허용되었는지 확인하세요.
               </div>`;
-          }
-        }, (error) => {
-          console.error("데이터 수신 오류:", error);
-          listContainer.innerHTML = `<div class="p-4 text-xs text-red-500 text-center">실시간 연결 중 에러가 발생했습니다. (보안규칙을 확인해보세요)</div>`;
+          });
         });
-      });
+      } catch (err) {
+        listContainer.innerHTML = `<div class="p-4 text-xs text-rose-500 text-center bg-rose-50 border border-rose-100 rounded-xl">오류: ${err.message}</div>`;
+      }
     }
 
     // 데이터를 받아서 순위 화면을 그리는 함수
@@ -226,3 +235,5 @@
   </script>
 </body>
 </html>
+
+```
