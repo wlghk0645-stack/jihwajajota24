@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Notion Point Ranking Widget</title>
+  <!-- Tailwind CSS for styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 프리미엄 한국어 폰트 적용 -->
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Pretendard', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'] },
+          colors: { notion_bg: '#fbfbfa', notion_border: '#e1e3e8', notion_text: '#191919', notion_desc: '#818386', accent_blue: '#2e7fff' },
+        },
+      },
+    }
+  </script>
+  <style>
+    /* 기본 테마 설정 */
+    :root { color-scheme: light; }
+    body { font-family: 'Pretendard', sans-serif; background-color: white; color: var(--notion_text); -webkit-font-smoothing: antialiased; }
+    
+    /* 제공 이미지 스타일 반영: 커스텀 카드 */
+    .ranking-card {
+      background-color: white;
+      border: 1px solid #e1e3e8; /* notion_border */
+      border-radius: 12px;
+      transition: all 0.2s ease-out;
+    }
+    
+    /* 1등 스타일 (연한 파란색 강조) */
+    .top-rank-1 {
+      border-color: #bee3f8; /* blue-200 */
+      background-color: #ebf8ff; /* blue-50 */
+    }
+  </style>
+</head>
+<body class="p-2 md:p-3 selection:bg-blue-100">
+
+  <!-- 위젯 메인 컨테이너 (이미지 비율 고려) -->
+  <div class="max-w-[340px] mx-auto">
+    
+    <!-- 헤더 -->
+    <div class="flex items-center justify-between mb-4 px-1">
+      <div class="flex items-center gap-2">
+        <span class="text-xl">🏆</span>
+        <h1 class="text-lg font-bold tracking-tight">실시간 포인트 순위</h1>
+      </div>
+      <!-- 관리 페이지로 바로가는 작은 아이콘 (더블클릭 시 이동) -->
+      <a href="admin.html" target="_blank" class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition" title="관리 페이지 열기 (더블클릭)">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+        </svg>
+      </a>
+    </div>
+
+    <!-- 순위 리스트 컨테이너 (JS 동적 생성) -->
+    <div id="rankingList" class="space-y-2.5">
+      <!-- Loading state -->
+      <div class="ranking-card flex items-center p-4 gap-3 text-sm text-gray-400">
+        데이터를 불러오는 중... (관리 페이지를 먼저 열어주세요)
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'notion_student_points_v2';
+    const listContainer = document.getElementById('rankingList');
+
+    // 데이터를 불러오고 순위를 계산하여 화면에 표시하는 함수
+    function updateRankingView() {
+      // 1. LocalStorage에서 데이터 로드
+      const savedData = localStorage.getItem(STORAGE_KEY);
+      if (!savedData) {
+        listContainer.innerHTML = `
+          <div class="ranking-card flex items-center p-4 gap-3 text-sm text-gray-400 border-yellow-200 bg-yellow-50">
+            등록된 데이터가 없습니다. <a href="admin.html" target="_blank" class="text-blue-600 font-medium underline ml-1">관리 페이지</a>에서 학생을 등록해주세요.
+          </div>`;
+        return;
+      }
+      
+      let students = [];
+      try { students = JSON.parse(savedData); } catch (e) { students = []; }
+
+      // 2. 점수 기준 내림차순 정렬 (동점시 이름순)
+      const sortedStudents = [...students].sort((a, b) => {
+        if (b.points !== a.points) { return b.points - a.points; }
+        return a.name.localeCompare(b.name, 'ko');
+      });
+
+      // 3. HTML 생성
+      listContainer.innerHTML = '';
+      
+      sortedStudents.forEach((student, index) => {
+        const rank = index + 1;
+        const isTop = rank === 1;
+        
+        // 1등 앞에는 왕관 이모지 추가
+        const displayName = isTop ? `👑 ${escapeHtml(student.name)}` : escapeHtml(student.name);
+
+        const card = document.createElement('div');
+        // 제공 이미지 테두리 스타일 적용 + 1등 강조
+        card.className = `ranking-card flex items-center justify-between p-3.5 gap-3 transition-colors ${isTop ? 'top-rank-1' : ''}`;
+
+        card.innerHTML = `
+          <div class="flex items-center gap-3">
+            <!-- 등수/왕관 -->
+            <div class="w-7 text-center font-extrabold ${isTop ? 'text-lg text-yellow-600' : 'text-sm text-gray-400'}">
+              ${rank}
+            </div>
+            <!-- 학생 이름 -->
+            <span class="font-semibold text-sm ${isTop ? 'text-blue-900' : 'text-gray-800'}">
+              ${displayName}
+            </span>
+          </div>
+          <!-- 포인트 수치 -->
+          <div class="text-right">
+            <span class="font-black text-base ${isTop ? 'text-blue-700' : 'text-gray-950'}">
+              ${student.points}
+            </span>
+            <span class="text-xs font-medium text-gray-400 ml-0.5">p</span>
+          </div>
+        `;
+        listContainer.appendChild(card);
+      });
+    }
+
+    // 초기 실행
+    window.onload = updateRankingView;
+
+    // 핵심: 다른 창(관리 페이지)에서 LocalStorage가 변경되면 자동으로 뷰 업데이트
+    window.addEventListener('storage', (event) => {
+      if (event.key === STORAGE_KEY) {
+        updateRankingView();
+      }
+    });
+
+    // 단순 문자 탈출 처리 (XSS 방지)
+    function escapeHtml(text) {
+      if (!text) return '';
+      return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+  </script>
+</body>
+</html>
